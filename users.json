@@ -1,14 +1,18 @@
 [
     {
         "idU": "kspinicci",
-        "password": "123k"
+        "password": "1234"
     },
     {
         "idU": "bosqueth",
-        "password": "123b"
+        "password": "1234"
     },
     {
         "idU": "kevins",
-        "password": ""
+        "password": "1234"
+    },
+    {
+        "idU": "test1",
+        "password": "d"
     }
 ]
