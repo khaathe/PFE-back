@@ -49,6 +49,9 @@ app.route('/user')
   .get(getUser)
   .post(postUser)
 
+app.route('/user/password')
+  .post(postUserPassword)
+
 /** Route pour la connection */
 app.route('/connect')
   .get(getConnection)
@@ -116,11 +119,10 @@ function postUser(req,res) {
   if (req.body.idU && req.body.password && req.body.nom && req.body.prenom && req.body.role ){
     query("INSERT INTO user (idU, nom, prenom, role) VALUES (?, ?, ?, ?)", [req.body.idU, req.body.nom, req.body.prenom, req.body.role])
   .then( ()=> {
-    users.push( { "idU" : req.body.idU, "password" : req.body.password } );
-    fs.writeFile(config.server.locationDir+"users.json", JSON.stringify(users), 'utf8', (err) => {
-        if (err) throw err
-        console.log("File '%s' has been modified", config.server.locationDir+"users.json");
-    });
+    //On modifie pas directement la liste des users, on la met à jour si l'écriture à fonctionné
+    let newUsers = users;
+    newUsers.push( { "idU" : req.body.idU, "password" : req.body.password } );
+    writeJsonFile(config.server.locationDir+"users.json", newUsers, users);
   })
   .then( res.json({"message":"Utilisateur créé"}) )
   .catch((err) => handleError(err, res));
@@ -129,6 +131,21 @@ function postUser(req,res) {
     err = new Error('Certains paramètres sont vide');
     err.code = 500;
     handleError(err,res);
+  }
+}
+
+function postUserPassword(req, res) {
+  console.log('POST /user/passsword - param[idU=%s, password=%s]',req.body.idU, req.body.password)
+  let userIndex = _.findIndex(users, { "idU" : req.body.idU});
+  if(userIndex === -1){
+    res.status(404).send({'message' : 'Utilisateur non trouvé'});
+  }
+  else {
+    //On modifie pas directement la liste des users, on la met à jour si l'écriture à fonctionné
+    let newUsers = users;
+    newUsers[userIndex].password = req.body.password;
+    writeJsonFile(config.server.locationDir+"users.json", newUsers, users);
+    res.json({'message':'Mot de passe modifié'});
   }
 }
 
@@ -216,6 +233,14 @@ function updateActivityAndComments (activity, idU){
   return query("UPDATE activity SET idU=?, period=?, dateActivity=?, activityType=? where activity.idA=?", 
   [idU, activity.period, activity.dateActivity, activity.activityType,activity.idA])
   .then( () => query("UPDATE comments SET comments=? where idA=?",[activity.comments, activity.idA]) )
+}
+
+function writeJsonFile(filePath, jsonObject, originalJsonObject) {
+  fs.writeFile(filePath, JSON.stringify(jsonObject), 'utf8', (err) => {
+    if (err) throw err
+    originalJsonObject = jsonObject;
+    console.log("File '%s' has been modified", filePath);
+});
 }
 
 if (users) {

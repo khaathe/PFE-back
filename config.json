@@ -8,6 +8,6 @@
     },
     "server" : {
         "port" : 8080,
-        "locationDir" : "C:/Bin/WorkspaceJava/PFE/back/"
+        "locationDir" : "C:/Bin/WorkspaceJava/OptimApp/PFE-back/"
     }
 }
