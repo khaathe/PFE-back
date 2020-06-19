@@ -18,21 +18,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
-/** Fonction pour gérer les erreurs */
-function handleError(err, res){
-  console.error(err);
-  res.status(500).send(err.message);
-}
-
-function query(sqlQuery,values) {
-  return new Promise( (resolve, reject) => {
-    conn.query(sqlQuery, values, (err, result, fields) => {
-      if (err) reject(err);
-      resolve(result);
-    });  
-  });
-}
-
 /** Route pour les activités */
 app.route('/activity')
   .get(getActivity)
@@ -67,6 +52,30 @@ app.route('/role')
  /** Route pour le calcul du temps de l'activité */
 app.route('/calcul-temps-activite')
   .get(getCalculTempsActivite)
+
+app.use(logError)
+app.use(handleError)
+
+
+function logError(err, req, res, next) {
+  console.error("%o", err);
+  next(err)  
+}
+
+/** Fonction pour gérer les erreurs */
+function handleError(err, req, res, next) {
+  res.status(500).send(err);
+  //res.render('error', { error: err });
+}
+
+function query(sqlQuery,values) {
+  return new Promise( (resolve, reject) => {
+    conn.query(sqlQuery, values, (err, result, fields) => {
+      if (err) reject(err);
+      resolve(result);
+    });  
+  });
+}
 
 function getActivity(req,res) {
   console.log('GET /activity params[idU=%s]', req.query.idU)
@@ -149,12 +158,14 @@ function postUserPassword(req, res) {
   }
 }
 
-function getConnection(req,res) {
+function getConnection(req,res, next) {
   console.log('GET /connect - [idU=%s, password=%s]', req.query.idU, req.query.password);
   if ( _.some(users, {"idU": req.query.idU, "password": req.query.password}) ){
     res.status(200).send()
   } else {
-    res.status(404).send()
+    let err = new Error('Utilisateur non trouvé');
+    err.status = 404
+    next(err);
   }
 }
 
