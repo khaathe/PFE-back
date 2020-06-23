@@ -4,7 +4,6 @@ var fs=require('fs');
 var cors=require('cors');
 
 var config = require('./config.json') ;
-var users = require('./users.json');
 var _ = require('lodash');
 const { resolve } = require('path');
 const { reject, result, values, update } = require('lodash');
@@ -29,6 +28,10 @@ app.route('/activity')
 app.route('/activity/type')
   .get(getActivityType)
   .post(postActivityType)
+
+/** Route pour la gestion des états des types d'activités */
+app.route('/activity/type/state')
+  .post(postActivityTypeState)
 
 /** Route pour les Utilisateurs */
 app.route('/user')
@@ -81,7 +84,6 @@ function handleError(err, req, res, next) {
     "status" : err.status,
     "message" : err.message
   })
-  //res.render('error', { error: err });
 }
 
 /**
@@ -145,8 +147,14 @@ async function postActivity(req, res, next) {
  * @param {*} next gestion des routes
  */
 function getActivityType(req,res, next) {
-  console.log('GET /activity/type');
-  query('SELECT * FROM activityType', []).then( (result) =>  res.json(result) ).catch((err) => {
+  console.log('GET /activity/type - param[state=%s]', req.query.state);
+  let sqlQuery = 'SELECT * FROM activityType';
+  let sqlValues = [];
+  if(req.query.state){
+    sqlQuery = sqlQuery + ' WHERE state=?';
+    sqlValues.push(req.query.state);
+  }
+  query(sqlQuery, sqlValues).then( (result) =>  res.json(result) ).catch((err) => {
     err.message = "Impossible de récupérer les types d'activités, la BD a retourné le messsage : "+ err.message;
     next(err);
   });
@@ -157,14 +165,42 @@ function getActivityType(req,res, next) {
  * @param {*} req requête
  * @param {*} res réponse
  * @param {*} next gestion des routes
+ * @returns les activités présentes dans la table
  */
-function postActivityType(req, res, next){
+async function postActivityType(req, res, next){
   console.log("POST /activity/type - param[code=%s, libelle=%s]", req.body.code, req.body.libelle);
-  query("INSERT INTO `activitytype` (`code`, `libelle`) VALUES (?, ?)", [req.body.code, req.body.libelle])
-  .then( ()=> res.json({"message":'Activité créé'}) ).catch((err) => {
+  await query("INSERT INTO activitytype (code, libelle, state) VALUES (?, ?, 'ACTIVE')", [req.body.code, req.body.libelle])
+  .catch((err) => {
     err.message = "Impossible de créer le type d'activité, la BD a retourné le messsage : "+ err.message;
     next(err);
   });
+  //on retourne les informations MAJ 
+  getActivityType(req, res, next);
+}
+
+/**
+ * Modifie l'état d'un type d'activité en base
+ * @param {*} req requête
+ * @param {*} res réponse
+ * @param {*} next gestion des routes
+ * @returns les activités présentes dans la table
+ */
+async function postActivityTypeState(req, res, next){
+  console.log("POST /activity/type/state - param[code=%s, state=%s]", req.body.code, req.body.state);
+  await query('UPDATE activitytype SET state = ? WHERE code in (?)', [req.body.state, req.body.code])
+  .then( (result)=> {
+    if (result.changedRows===0) {
+      let err = new Error('Aucune information n\'a été modifiées. Soit les activités n\'existe pas, soit elles ont déjà l\'état demandé.');
+      err.status = "INFORMATION_NOT_UPDATED";
+      next(err);
+    }
+  })
+  .catch((err) => {
+    err.message = "Impossible de modifier l'état du type d'activité, la BD a retourné le messsage : "+ err.message;
+    next(err);
+  });
+  //on retourne les informations MAJ 
+  getActivityType(req, res, next);
 }
 
 /**
@@ -175,7 +211,7 @@ function postActivityType(req, res, next){
  */
 function getUser(req, res, next) {
   console.log('GET /user params[idU=%s]', req.query.idU);
-  query('SELECT * FROM `user` where idU=?', [req.query.idU]).then( (result) => {
+  query('SELECT idU, nom, prenom, role FROM `user` where idU=?', [req.query.idU]).then( (result) => {
     if (result.length>0) res.json(result[0]);
     else res.json({});
   }).catch((err) => {
@@ -194,13 +230,7 @@ function getUser(req, res, next) {
 function postUser(req,res, next) {
   console.log("POST /user - param[idU=%s, password=%s, nom=%s, prenom=%s, role=%s]", req.body.idU, req.body.password, req.body.nom, req.body.prenom, req.body.role);
   if (req.body.idU && req.body.password && req.body.nom && req.body.prenom && req.body.role ){
-    query("INSERT INTO user (idU, nom, prenom, role) VALUES (?, ?, ?, ?)", [req.body.idU, req.body.nom, req.body.prenom, req.body.role])
-    .then( ()=> {
-      //On modifie pas directement la liste des users, on la met à jour si l'écriture à fonctionné
-      let newUsers = users;
-      newUsers.push( { "idU" : req.body.idU, "password" : req.body.password } );
-      writeJsonFile(config.server.locationDir+"users.json", newUsers, users);
-    })
+    query("INSERT INTO user (idU, password, nom, prenom, role) VALUES (?, ?, ?, ?, ?)", [req.body.idU, req.body.password, req.body.nom, req.body.prenom, req.body.role])
     .then( res.json({"message":"Utilisateur créé"}) )
     .catch((err) => {
       err.message = "Impossible de créer l'utilisateur '" + req.body.idU + "', la BD a retourné le messsage : "+ err.message;
@@ -209,7 +239,7 @@ function postUser(req,res, next) {
   }
   else {
     err = new Error('Certains paramètres sont vide');
-    err.code = 500;
+    err.code = 'BAD PARAMETER';
     next(err);
   }
 }
@@ -222,19 +252,19 @@ function postUser(req,res, next) {
  */
 function postUserPassword(req, res, next) {
   console.log('POST /user/passsword - param[idU=%s, password=%s]',req.body.idU, req.body.password)
-  let userIndex = _.findIndex(users, { "idU" : req.body.idU});
-  if(userIndex === -1){
-    let err = new Error('Utilisateur non trouvé');
-    err.status = "USER_NOT_FOUND";
+  query('UPDATE user SET password = ? WHERE idU=?', [req.body.password, req.body.idU]).then( (result) => {
+    if (result.changedRows===0) {
+      let err = new Error('Aucune information n\'a été modifiées. Vérifiez que l\'id utilisateur existe.');
+      err.status = "INFORMATION_NOT_UPDATED";
+      next(err);
+    }
+    else 
+      res.json({'message':'Mot de passe modifié'});
+  }).catch((err) => {
+    err.message = "Impossible de modifier les informations de l'utilisateur" + req.query.idU 
+    + ", la BD a retourné le messsage : " + err.message;
     next(err);
-  }
-  else {
-    //On modifie pas directement la liste des users, on la met à jour si l'écriture à fonctionné
-    let newUsers = users;
-    newUsers[userIndex].password = req.body.password;
-    writeJsonFile(config.server.locationDir+"users.json", newUsers, users);
-    res.json({'message':'Mot de passe modifié'});
-  }
+  });
 }
 
 /**
@@ -245,13 +275,18 @@ function postUserPassword(req, res, next) {
  */
 function getConnection(req,res, next) {
   console.log('GET /connect - [idU=%s, password=%s]', req.query.idU, req.query.password);
-  if ( _.some(users, {"idU": req.query.idU, "password": req.query.password}) ){
-    res.json({"messsage":"Utilisateur trouvé"});
-  } else {
-    let err = new Error('Utilisateur non trouvé');
-    err.status = "USER_NOT_FOUND";
+  query('SELECT * FROM user where idU=? and password=?', [req.query.idU, req.query.password]).then( (result) => {
+    if (result.length>0) res.json({"messsage":"Utilisateur trouvé"});
+    else {
+      let err = new Error('Utilisateur non trouvé');
+      err.status = "USER_NOT_FOUND";
+      next(err);
+    }
+  }).catch((err) => {
+    err.message = "Impossible de récupérer les informations de l'utilisateur" + req.query.idU 
+    + ", la BD a retourné le messsage : " + err.message;
     next(err);
-  }
+  });
 }
 
 /**
@@ -356,24 +391,5 @@ function updateActivityAndComments (activity, idU){
   .then( () => query("UPDATE comments SET comments=? where idA=?",[activity.comments, activity.idA]) )
 }
 
-/**
- * Ecrit un objet dans un fichier au format json
- * @param {string} filePath : chemin vers le fichier à écrire
- * @param {*} jsonObject : object à écrire
- * @param {*} originalJsonObject : objet original à update
- */
-function writeJsonFile(filePath, jsonObject, originalJsonObject) {
-  fs.writeFile(filePath, JSON.stringify(jsonObject), 'utf8', (err) => {
-    if (err) next(err);
-    originalJsonObject = jsonObject;
-    console.log("File '%s' has been modified", filePath);
-});
-}
-
-if (users) {
-  app.listen(config.server.port);
-  console.log("listening on port ", config.server.port);
-}
-else {
-  console.error('La liste des utilisateurs n\'a pas été chargé. Vérifier que le fichier est bien présent.')
-}
+app.listen(config.server.port);
+console.log("listening on port ", config.server.port);
