@@ -7,7 +7,6 @@
         "database": "optimapp"
     },
     "server" : {
-        "port" : 8080,
-        "locationDir" : "C:/Bin/WorkspaceJava/PFE/back/"
+        "port" : 8080
     }
 }
